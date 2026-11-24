@@ -38,3 +38,4 @@ pub fn printf(comptime format: []const u8, args: anytype) void {
     };
     writer.print(format, args) catch {};
 }
+
