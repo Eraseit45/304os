@@ -2,6 +2,8 @@
 extern var __bss: u8;
 extern var __bss_end: u8;
 extern var __stack_top: u8;
+const std = @import("std");
+const printf = @import("common.zig").printf;
 // sbi-api implement
 
 // 首先得考虑下如何实现sbi规范,之前看rcore的时候没注意他是调用了rustsbi的crates吃大亏了
@@ -46,7 +48,7 @@ fn sbi_call(
 
 // 实现putchar syscall 用来写hello world
 
-fn putchar(ch: u8) void {
+pub fn putchar(ch: u8) void {
     // u8 会自动补全成u32
     _ = sbi_call(ch, 0, 0, 0, 0, 0, 0, 1);
 }
@@ -54,28 +56,22 @@ fn putchar(ch: u8) void {
 // 内核初始化
 
 // 给内核分配初始内存空间
-fn memset(buf: [*]u8, byte: u8, n: usize) [*]u8 {
-    for (buf[0..n]) |*p| {
-        p.* = byte;
-    }
-    return buf;
-}
+// fn memset(buf: [*]u8, byte: u8, n: usize) [*]u8 {
+//     for (buf[0..n]) |*p| {
+//         p.* = byte;
+//     }
+//     return buf;
+// }
 
 export fn kernel_main() void {
-    // 将bss转换为指向首字节的指针
-    const buf: [*]u8 = @ptrCast(&__bss);
     // intFromPtr 将地址转换为整数
     const len = @intFromPtr(&__bss_end) - @intFromPtr(&__bss);
     // 初始化.bss段
-    _ = memset(buf, 0, len);
+    const bss: [*]u8 = @ptrCast(&__bss);
+    _ = @memset(bss[0..len], 0);
 
     // helloworld 来
-    const words: []const u8 = "Hello,World!\n";
-    for (words) |char| {
-        if (char != '\n') {
-            putchar(char);
-        }
-    }
+    printf("{s}\n", .{"Hello,world!"});
     while (true) {
         asm volatile ("wfi");
     }

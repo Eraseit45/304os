@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const kernel = b.addExecutable(.{
-        .name = "zigos.elf",
+        .name = "304os.elf",
         //启用连接器
         .use_lld = true,
         .root_module = b.createModule(.{
