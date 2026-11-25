@@ -3,6 +3,11 @@ extern var __bss: u8;
 extern var __bss_end: u8;
 extern var __stack_top: u8;
 
+// 只要两个指针标记的是同一段连续内存的起点和末端
+// 就可以用起点+长度构造切片
+extern var __free_ram: u8;
+extern var __free_ram_end: u8;
+
 const std = @import("std");
 const printf = @import("common.zig").printf;
 
@@ -240,4 +245,37 @@ export fn handle_trap(f: *trap_frame) void {
         stval,
         user_pc,
     });
+}
+
+// 内存分配
+// 该内存算法假定内存是被连续分配的
+// 称为线性分配器,一般用于不需要释放内存的场景
+// 接下来要实现的部分是按页分配内存,这里一页给4KB
+const PAGESIZE: usize = 4096;
+fn allocPages(n: u32) u32 {
+    const Mem_State = struct {
+        // 在函数里塞一个结构体,在编译/调用函数的时候并没有实例化这个结构体
+        //结构体内的变量有静态存储期且不会被该函数外的函数发现
+        var used_mem_size: usize = 0;
+    };
+    const used_mem = Mem_State.used_mem_size;
+    // 通过双多项指针框选连续内存分区
+    // 先把两个连接器中定义的变量变成多项指针
+    const ram_start: [*]u8 = @ptrCast(&__free_ram);
+    const ram_end: [*]u8 = @ptrCast(&__free_ram_end);
+    // 计算可用的内存
+    const ram_available: usize = ram_end - ram_start - used_mem;
+    if (ram_available <= 0) {
+        @panic("no memorys available!");
+    }
+    // 通过指针加法确认真正可分配的内存在哪里
+    const free_start: [*]u8 = ram_start + used_mem;
+    // 通过多项指针获取可用内存切片
+    if (n > ram_available / PAGESIZE) {
+        @panic("not enough ram!");
+    }
+    const alloc_size = PAGESIZE * @as(usize, n);
+    Mem_State.used_mem_size += alloc_size;
+    @memset(free_start[0..alloc_size], 0);
+    return @intFromPtr(free_start);
 }
