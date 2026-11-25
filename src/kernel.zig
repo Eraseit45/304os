@@ -90,10 +90,15 @@ export fn kernel_main() void {
 
     // helloworld 来
     printf("{s}\n", .{"Hello,world!"});
-    writeCsr("stvec", @intFromPtr(&kernel_entry));
+    const paddr0: u32 = allocPages(2);
+    const paddr1: u32 = allocPages(1);
+    printf("alloc_pages test: paddr0 = {x}\n", .{paddr0});
+    printf("alloc_pages test: paddr1 = {x}\n", .{paddr1});
+    // writeCsr("stvec", @intFromPtr(&kernel_entry));
     // 伪指令
     // 解析成 csrrw x0 cycle, x0, cycle是只读寄存器,会触发非法指令异常
-    asm volatile ("unimp");
+    // asm volatile ("unimp");
+    @panic("booted!");
 }
 
 // 用export 让zig把boot()写进目标文件的符号表
@@ -278,4 +283,92 @@ fn allocPages(n: u32) u32 {
     Mem_State.used_mem_size += alloc_size;
     @memset(free_start[0..alloc_size], 0);
     return @intFromPtr(free_start);
+}
+
+// process management
+
+const PROCS_MAX = 8;
+const PROCS_UNUSED = 0;
+const PROCS_RUNNABLE = 1;
+
+var procs: [PROCS_MAX]process = @splat(.{ .pid = undefined, .state = PROCS_UNUSED, .sp = undefined, .stack = undefined });
+
+const process = struct {
+    pid: i32, // 进程id
+    state: i32, // 进程状态
+    sp: [*]u32,
+    // 栈指针,他指向的是内核栈的栈顶: sp -> stack_top
+    // 这里我们向下走13位用来放pc+12个通用寄存器
+    stack: [8192]u8 align(16), // 内核栈
+    // 保证数组末端栈顶对齐
+};
+
+fn create_process(pc: u32) *process {
+    // 函数流程: 找一个似了的进程块,他之前的栈里保存了什么无所谓
+    var found: ?*process = null;
+    for (&procs, 0..) |*proc, i| {
+        if (proc.state == PROCS_UNUSED) {
+            found = proc;
+            found.pid = @intCast(i + 1);
+            found.state = PROCS_RUNNABLE;
+            break;
+        }
+    }
+    const target_process = found orelse @panic("no free process slots");
+
+    // 初始化一个多项指针指向栈底
+    // 栈顶存放的是12个寄存器+pc的内存,剩下的内存用于存储进程栈上的变量
+    // stack[0]其实是栈底..
+    const stack_sp: [*]u32 = @ptrCast(&target_process.stack);
+    // 孩子们要记住栈是从底往上堆的..后进先出
+    const stack_top = stack_sp + target_process.stack.len / @sizeOf(u32) - 13;
+    stack_top[0] = pc;
+    // zig 切片右端不包含..
+    @memset(stack_top[1..13], 0);
+    target_process.sp = stack_top;
+    return target_process orelse {
+        @panic("no free process slots");
+    };
+}
+
+export fn switch_context(_: *u32, _: *u32) callconv(.naked) void {
+    asm volatile (
+        \\ addi sp, sp, -13 * 4    
+        \\ sw ra, 0 * 4(sp)
+        \\ sw s0, 1 * 4(sp)
+        \\ sw s1, 2 * 4(sp)
+        \\ sw s2, 3 * 4(sp)
+        \\ sw s3, 4 * 4(sp)
+        \\ sw s4, 5 * 4(sp)
+        \\ sw s5, 6 * 4(sp)
+        \\ sw s6, 7 * 4(sp)
+        \\ sw s7, 8 * 4(sp)
+        \\ sw s8, 9 * 4(sp)
+        \\ sw s9, 10 * 4(sp)
+        \\ sw s10, 11 * 4(sp)
+        \\ sw s11, 12 * 4(sp)
+
+        // 切换栈指针
+        \\ sw sp, (a0)
+        \\ lw sp, (a1)
+
+        // 从下一个进程的栈中恢复被调用者保存的寄存器
+        \\ lw ra, 0 * 4(sp)
+        // 仅恢复被调用者保存的寄存器
+        \\ lw s0, 1 * 4(sp)
+        \\ lw s1, 2 * 4(sp)
+        \\ lw s2, 3 * 4(sp)
+        \\ lw s3, 4 * 4(sp)
+        \\ lw s4, 5 * 4(sp)
+        \\ lw s5, 6 * 4(sp)
+        \\ lw s6, 7 * 4(sp)
+        \\ lw s7, 8 * 4(sp)
+        \\ lw s8, 9 * 4(sp)
+        \\ lw s9, 10 * 4(sp)
+        \\ lw s10, 11 * 4(sp)
+        \\ lw s11, 12 * 4(sp)
+        \\ addi sp, sp, 13 * 4  
+        // 我们已经从栈中弹出 13个4字节寄存器
+        \\ ret
+    );
 }
